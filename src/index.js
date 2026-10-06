@@ -2,7 +2,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 const PROVIDERS = [
   { name:'linkvertise', re:/(?:linkvertise\.(?:com|net)|link-to\.net|up-to-down\.(?:net|com)|file-upload\.net|downloadfile\.(?:net|com))/i, fn: lvResolver },
-  { name:'lootlabs',    re:/(?:loot-link\.com|lootlabs\.gg|loot-links\.com|lootdest\.(?:com|org))/i, fn: lootResolver },
+  { name:'lootlabs',    re:/(?:loot-link\.com|lootlabs\.gg|loot-links\.com|lootdest\.(?:com|org)|links\.lootlabs\.gg)/i, fn: lootResolver },
+  { name:'platorelay',  re:/platorelay\.com/i, fn: platResolver },
   { name:'sub2unlock',  re:/(?:sub2unlock\.(?:com|net|io)|sub4unlock)/i, fn: subResolver },
   { name:'rekonise',    re:/rekonise\.com/i, fn: rekoResolver },
   { name:'workink',     re:/work\.ink/i, fn: genericResolver },
@@ -104,16 +105,94 @@ async function lvResolver(url) {
 }
 
 async function lootResolver(url) {
-  const res = await req(url);
+  const res = await req(url, {
+    headers: {
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1',
+      'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"'
+    }
+  });
   const html = await res.text();
+
   const direct = pick(html, [
     /"destination"\s*:\s*"([^"]+)"/i,
     /"url"\s*:\s*"([^"]+)"/i,
     /"target"\s*:\s*"([^"]+)"/i,
-    /data-url=["']([^"']+)["']/i
+    /"redirect"\s*:\s*"([^"]+)"/i,
+    /data-url=["']([^"']+)["']/i,
+    /"link"\s*:\s*"([^"]+)"/i
   ]);
-  if (direct) return direct.replace(/\\\//g, '/');
+
+  if (direct && !direct.includes('lootlabs') && !direct.includes('loot-link')) {
+    return direct.replace(/\\\//g, '/');
+  }
+
+  return bypassVip(url);
+}
+
+async function bypassVip(url) {
+  try {
+    const form = new URLSearchParams();
+    form.append('url', url);
+
+    const r = await fetch('https://api.bypass.vip/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': UA,
+        'Accept': 'application/json'
+      },
+      body: form.toString()
+    });
+
+    const j = await r.json();
+    if (j && j.destination) return j.destination;
+    if (j && j.result) return j.result;
+    if (j && j.url) return j.url;
+    if (j && j.status === 'success' && j.result) return j.result;
+  } catch (e) {}
+
   return genericResolver(url);
+}
+
+async function platResolver(url) {
+  try {
+    const res = await req(url, {
+      headers: {
+        'Accept': 'application/json, text/plain, */*',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+
+    const text = await res.text();
+
+    try {
+      const j = JSON.parse(text);
+      if (j.url) return j.url;
+      if (j.destination) return j.destination;
+      if (j.key) return j.key;
+      if (j.result) return j.result;
+      if (j.link) return j.link;
+    } catch (e) {}
+
+    const direct = pick(text, [
+      /"url"\s*:\s*"([^"]+)"/i,
+      /"key"\s*:\s*"([^"]+)"/i,
+      /"destination"\s*:\s*"([^"]+)"/i,
+      /"link"\s*:\s*"([^"]+)"/i
+    ]);
+
+    if (direct) return direct;
+  } catch (e) {}
+
+  return bypassVip(url);
 }
 
 async function subResolver(url) {
